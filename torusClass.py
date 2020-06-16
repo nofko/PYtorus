@@ -18,16 +18,17 @@ class torus:
         self.r_in=r_in
         self.r_out=r_out
 
-        self.seuil=50
+        self.seuil=5
         self.kerSize=7
 
         self.xCenter=0
         self.yCenter=0
 
-        self.D1=50
-        self.D2=1500
+        self.D1=1450
+        self.D2=5
         self.kA=5
         self.thetaLen=3001
+        self.thetaLin=np.linspace(0,2*np.pi,num=self.thetaLen,endpoint=True)
 
         self.g_eff=9.81*np.sin(4.5*np.pi/180)
         self.sigma_eff=0.045
@@ -88,9 +89,9 @@ class torus:
 
                 border=self.getBorder(frame,0)
                 tempSig=self.getSignal(border)
-                self.signal[i,:]=tempSig[1]-self.calibSig[1]
+                self.signal[i,:]=tempSig-self.calibSig
 
-                self.rawSig[i,:]=tempSig[1]
+                self.rawSig[i,:]=tempSig
                 #self.signal[i,:]=tempSig[1]-np.average(tempSig[1])
 
                 i+=1
@@ -130,9 +131,8 @@ class torus:
             gray=image
         else:
             gray=cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
+        temp=gray
         gray=gray-self.calibEmpty*self.percInit
-        diff=gray
 
         mask_inner=np.ones_like(gray)
         mask_outer=np.zeros_like(gray)
@@ -209,14 +209,13 @@ class torus:
         sortedTheta,sortedR=(list(t) for t in zip(*sorted(zip(thetaPos,radialPos))))
         sortedR=medfilt(sortedR,7)
 
-        thetaLin=np.linspace(0,2*np.pi,num=self.thetaLen,endpoint=True)
-        self.thetaLin=thetaLin
 
-        fp=np.interp(thetaLin,sortedTheta,sortedR,period=2*np.pi)
+        fp=np.interp(self.thetaLin,sortedTheta,sortedR,period=2*np.pi)
 
-        return np.array([thetaLin,fp])
+        return np.array(fp)
 
     def calibrate(self,image):
+        """Function used to get the stationary signal, ie to calibrate"""
 
         border=self.getBorder(image,1)
 
@@ -234,17 +233,17 @@ class torus:
 
         self.fftShifted=np.fft.fftshift(self.fft)
 
-        self.fft=np.abs(self.fft)
+        self.fft=self.fft
         self.fftShifted=np.abs(self.fftShifted)
 
         self.K2max, self.K1max=self.signal.shape
-        self.K2max, self.K1max=(self.K2max-1)/2,(self.K1max-1)/2
+        self.K2max, self.K1max=int((self.K2max-1)/2),int((self.K1max-1)/2)
 
         self.kLin=(np.arange(-self.K1max,self.K1max+1)-0.5)/self.r_phys
         self.omLin=np.arange(-self.K2max,self.K2max+1)*2*np.pi*self.fps/self.numFrames
 
-        self.rngK=range(int(self.K1max-self.D1),int(self.K1max+self.D1+1))
-        self.rngOm=range(int(self.K2max-self.D2),int(self.K2max+self.D2+1))
+        self.rngK=range(int(self.D1),int(2*self.K1max-self.D1+1))
+        self.rngOm=range(int(self.D2),int(2*self.K2max-self.D2+1))
 
         self.kLinCrop=self.kLin[self.rngK]
         self.omLinCrop=self.omLin[self.rngOm]
@@ -256,35 +255,65 @@ class torus:
 
         self.fftCrop=np.log(self.fftShifted[self.rngOm,:][:,self.rngK])
 
-        self.figFft,self.axFft=plt.subplots(figsize=(9,9))
+        figFft,axFft=plt.subplots(figsize=(12,9))
 
-        self.axFft.pcolormesh(self.kLinCrop,self.omLinCrop,self.fftCrop,vmin=self.cmin,vmax=self.cmax,cmap=parula_map)
+        four=axFft.pcolormesh(self.kLinCrop,self.omLinCrop,self.fftCrop,vmin=self.cmin,vmax=self.cmax,cmap=parula_map)
 
         plt.xlabel("k [m$^{-1}$]")
         plt.ylabel("$\omega$ [rad$\cdot$s$^{-1}$]")
+        plt.colorbar(four,ax=axFft)
 
         return
 
     def dispersion(self,k):
+        """Returns the dispersion relation for given k values"""
 
         temp=(self.g_eff*k+self.sigma_eff*k**3/self.rho)*np.tanh(self.c_eff**2*k/self.g_eff)
 
         return np.sqrt(temp)
 
+
     def plotDispersion(self,N):
+        """Plots the dispersion relation omega(k/N)*N"""
 
         self.fitDis=self.dispersion(self.kLinCrop/N)*N
         plt.plot(self.kLinCrop[self.kA:-self.kA+1],self.fitDis[self.kA:-self.kA+1], "--r",linewidth=0.7)
 
         return
 
-    def plotLinear(self):
+    def plotDoppler(self,N,v):
+        """Plots the dispersion relation omega(k/N)*N"""
 
-        plt.plot(self.kLinCrop,self.kLinCrop*self.c_eff,"--r",linewidth=0.7)
+        self.fitDisDop=v*self.kLinCrop+self.dispersion(self.kLinCrop/N)*N
+        plt.plot(self.kLinCrop[self.kA:-self.kA+1],self.fitDisDop[self.kA:-self.kA+1], "--r",linewidth=0.7)
 
         return
 
+
+    def plotLinear(self,slope):
+        """Plots a linear curve with the given slope"""
+
+        plt.plot(self.kLinCrop,self.kLinCrop*slope,"--r",linewidth=0.7)
+
+        return
+
+
+    def showSignal(self):
+
+        fig,ax=plt.subplots()
+
+        line=ax.plot(solit.thetaLin, solit.signal[0,:],lw=2)[0]
+
+        def animate(i):
+            line.set_ydata(solit.signal[i,:])
+
+        anim=FuncAnimation(fig,animate,interval=100,frames=len(solit.signal)-1)
+        anim.save('basic_animation.mp4', fps=30, extra_args=['-vcodec', 'libx264'])
+        return
+
     def saveData(self):
+        """ Saves the signal, r_phys, fps, sigma and c into a .npy file with the same name as the video
+        in the same location"""
 
         data=np.array([self.signal,self.r_phys,self.fps,self.sigma_eff,self.c_eff])
         name=self.videoLoc.split(".mp4")
@@ -294,6 +323,8 @@ class torus:
         return
 
     def loadData(self):
+        """Loads the saved signal etc. assuming that it still has the same name as the video and is located
+        in the same folder"""
 
         name=self.videoLoc.split(".mp4")
         name=name[0]
@@ -304,7 +335,7 @@ class torus:
         self.fps=data[2]
         self.sigma_eff=data[3]
         self.c_eff=data[4]
-
+        self.numFrames=len(self.signal)
         return
 
 
