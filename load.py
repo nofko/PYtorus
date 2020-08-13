@@ -12,11 +12,6 @@ plt.rcParams['text.latex.preamble']=[r"\usepackage{lmodern}"]
 params = {'text.usetex' : True,'font.size' : 20,'font.family' : 'lmodern','svg.fonttype':'none'}
 plt.rcParams.update(params)
 
-
-
-#To show video or not
-showVideo=0
-
 #Useful for getting the locations of the videos
 
 def getFilenames(day,month,videoName,calibF,calibE):
@@ -78,4 +73,5 @@ cm_data = [ [0.2081, 0.1663, 0.5292],
             [0.9763, 0.9831, 0.0538]]
 
 parula_map = LinearSegmentedColormap.from_list('parula', cm_data)
+parula_map_r = LinearSegmentedColormap.from_list('parula', cm_data[::-1])
 

@@ -3,9 +3,9 @@ class torus:
 
     Input:
         filenames   - list of 3 elements, file locations [video,calibration_full, calibration_empty]
-        r_phys      - number, physical radius of the interface we are analyzing
-        r_in        - radius of inner crop circle
-        r_out       - radius of outer crop circle
+        r_phys      - float, physical radius of the interface we are analyzing
+        r_in        - int, radius of inner crop circle
+        r_out       - int, radius of outer crop circle
     """
 
     def __init__(self,filenames,r_phys,r_in,r_out):
@@ -14,6 +14,8 @@ class torus:
         self.calibFullLoc=filenames[1]
         self.calibEmptyLoc=filenames[2]
 
+        self.showVideo=1
+        
         self.r_phys=r_phys
         self.r_in=r_in
         self.r_out=r_out
@@ -67,8 +69,6 @@ class torus:
         Output:
             numpy array - (time,theta) numpy array containng the signal in time and space
 
-        TODO:
-            this will end up as a part of a class, will be different probz
         """
 
         if self.calibImg==1:
@@ -92,7 +92,6 @@ class torus:
                 self.signal[i,:]=tempSig-self.calibSig
 
                 self.rawSig[i,:]=tempSig
-                #self.signal[i,:]=tempSig[1]-np.average(tempSig[1])
 
                 i+=1
 
@@ -111,6 +110,7 @@ class torus:
 
         Input:
             image - an image, or a frame from a video
+            calib - integer, 1 if the image is a calibration image
 
         Output:
             numpy array - 1st element = list, x coordinates
@@ -121,8 +121,6 @@ class torus:
             r_outer - defined globally, outside crop
             seuil   - to be adjusted depending on image
 
-        TODO:
-            a bit of optimization for better results, the contour could be sharper
         """
 
         height, width = image.shape[:2]
@@ -131,7 +129,9 @@ class torus:
             gray=image
         else:
             gray=cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
         temp=gray
+        
         gray=gray-self.calibEmpty*self.percInit
 
         mask_inner=np.ones_like(gray)
@@ -153,7 +153,6 @@ class torus:
         contours, hierarchy = cv2.findContours(circ, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
 
         cMax=max(contours,key=cv2.contourArea)
-        #chull=cv2.convexHull(cMax)
 
         if calib==1:
 
@@ -161,18 +160,20 @@ class torus:
             self.xCenter=self.rect[0][0]
             self.yCenter=self.rect[0][1]
 
-        if showVideo==1:
-
+        if self.showVideo==1:
+            
             blank=np.ones((height,width,3),np.uint8)*255
+
             cv2.drawContours(blank, [cMax], 0, (255,0,0),3)
             #cv2.drawContours(blank, contours, -1, (255,0,0),3)
+
             cv2.circle(blank,(int(self.xCenter),int(self.yCenter)),int(self.r_in),(0,0,255))
             cv2.circle(blank,(int(self.xCenter),int(self.yCenter)),int(self.r_out),(0,0,255))
+
             cv2.namedWindow('shown',cv2.WINDOW_NORMAL)
             cv2.imshow('shown',blank)
             cv2.resizeWindow('shown',800,600)
             cv2.waitKey(2)
-
 
         shape=np.vstack(cMax).squeeze()
         xSig=shape[:,0]-self.xCenter
@@ -240,6 +241,7 @@ class torus:
         self.K2max, self.K1max=int((self.K2max-1)/2),int((self.K1max-1)/2)
 
         self.kLin=(np.arange(-self.K1max,self.K1max+1)-0.5)/self.r_phys
+        self.kThLin=(np.arange(-self.K1max,self.K1max+1)-0.5)
         self.omLin=np.arange(-self.K2max,self.K2max+1)*2*np.pi*self.fps/self.numFrames
 
         self.rngK=range(int(self.D1),int(2*self.K1max-self.D1+1))
@@ -247,23 +249,40 @@ class torus:
 
         self.kLinCrop=self.kLin[self.rngK]
         self.omLinCrop=self.omLin[self.rngOm]
+        self.kThLinCrop=self.kThLin[self.rngK]
+
+        self.fftCrop=self.fftShifted[self.rngOm,:][:,self.rngK]
 
         return
 
     def drawSpectrum(self):
-        """Does the Fourier transform and draw the cropped spectrum"""
-
-        self.fftCrop=np.log(self.fftShifted[self.rngOm,:][:,self.rngK])
+        """Draws the spectrum cropped around 0,0"""
 
         figFft,axFft=plt.subplots(figsize=(12,9))
 
-        four=axFft.pcolormesh(self.kLinCrop,self.omLinCrop,self.fftCrop,vmin=self.cmin,vmax=self.cmax,cmap=parula_map)
+        four=axFft.pcolormesh(self.kLinCrop,self.omLinCrop,np.log(self.fftCrop),vmin=self.cmin,vmax=self.cmax,cmap=parula_map)
 
         plt.xlabel("k [m$^{-1}$]")
         plt.ylabel("$\omega$ [rad$\cdot$s$^{-1}$]")
         plt.colorbar(four,ax=axFft)
 
         return
+    def drawTheta(self):
+        """Draws the spectrum in dependance on the angular wavenumber"""
+
+        plt.subplots(figsize=(12,9))
+        
+        l1=int(len(self.kThLinCrop-1)/2)
+        l2=int(len(self.omLinCrop-1)/2)
+
+        four=plt.pcolormesh(self.kThLinCrop[l1:],self.omLinCrop[l2:],np.log(self.fftCrop[l2:,l1:]),vmin=self.cmin,vmax=self.cmax,cmap=parula_map)
+
+        plt.xlabel(r"k$_\theta$")
+        plt.ylabel("$\omega$ [rad$\cdot$s$^{-1}$]")
+        cbar=plt.colorbar()
+        cbar.set_label(r"log[$\tilde{\eta}(k,\omega)$]")
+        return
+
 
     def dispersion(self,k):
         """Returns the dispersion relation for given k values"""
@@ -272,6 +291,12 @@ class torus:
 
         return np.sqrt(temp)
 
+    def dispersionTh(self,k):
+        """Returns the angular dispersion relation for given k values"""
+
+        temp=(self.g_eff*k/self.r_phys+self.sigma_eff*k**3/self.rho/self.r_phys**3)*np.tanh(self.c_eff**2*k/self.g_eff/self.r_phys)
+
+        return np.sqrt(temp)
 
     def plotDispersion(self,N):
         """Plots the dispersion relation omega(k/N)*N"""
@@ -281,8 +306,17 @@ class torus:
 
         return
 
+    def plotDispersionTh(self,N):
+        """Plots the angular dispersion relation omega(k/N)*N"""
+
+        self.fitDisTh=self.dispersionTh(self.kThLinCrop/N)*N
+        plt.plot(self.kThLinCrop[self.kA:-self.kA+1],self.fitDisTh[self.kA:-self.kA+1], "--r",linewidth=0.7)
+
+        return
+
+
     def plotDoppler(self,N,v):
-        """Plots the dispersion relation omega(k/N)*N"""
+        """Plots the Doppler shifted dispersion relation"""
 
         self.fitDisDop=v*self.kLinCrop+self.dispersion(self.kLinCrop/N)*N
         plt.plot(self.kLinCrop[self.kA:-self.kA+1],self.fitDisDop[self.kA:-self.kA+1], "--r",linewidth=0.7)
@@ -297,19 +331,6 @@ class torus:
 
         return
 
-
-    def showSignal(self):
-
-        fig,ax=plt.subplots()
-
-        line=ax.plot(solit.thetaLin, solit.signal[0,:],lw=2)[0]
-
-        def animate(i):
-            line.set_ydata(solit.signal[i,:])
-
-        anim=FuncAnimation(fig,animate,interval=100,frames=len(solit.signal)-1)
-        anim.save('basic_animation.mp4', fps=30, extra_args=['-vcodec', 'libx264'])
-        return
 
     def saveData(self):
         """ Saves the signal, r_phys, fps, sigma and c into a .npy file with the same name as the video
