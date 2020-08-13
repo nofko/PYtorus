@@ -1,4 +1,4 @@
-# torus
+# PYtorus
 Detection and analysis of liquid torus
 
 The main class is contained in torusClass.py
